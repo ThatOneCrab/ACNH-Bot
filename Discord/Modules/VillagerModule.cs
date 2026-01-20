@@ -110,23 +110,35 @@ namespace SysBot.ACNHOrders
         {
             if (!Globals.Bot.Config.DodoModeConfig.LimitedDodoRestoreOnlyMode)
             {
-                await ReplyAsync($"{Context.User.Mention} - Villagers on the island may be replaceable by adding them to your order command.");
+                var noticeEmbed = new Discord.EmbedBuilder()
+                    .WithTitle("Villager Replacement Notice")
+                    .WithDescription($"{Context.User.Mention} - Villagers on the island may be replaceable by adding them to your order command.")
+                    .WithColor(Discord.Color.Orange)
+                    .WithFooter(footer => footer.Text = $"Requested by {Context.User.Username}");
+
+                await ReplyAsync(embed: noticeEmbed.Build()).ConfigureAwait(false);
                 return;
             }
 
-            await ReplyAsync($"The following villagers are on {Globals.Bot.TownName}: {Globals.Bot.Villagers.LastVillagers}.").ConfigureAwait(false);
+            var villagersText = string.IsNullOrWhiteSpace(Globals.Bot.Villagers.LastVillagers)
+                ? "No villagers are currently listed."
+                : Globals.Bot.Villagers.LastVillagers;
+
+            var listEmbed = new Discord.EmbedBuilder()
+                .WithTitle($"Villagers on {Globals.Bot.TownName}")
+                .WithDescription(villagersText)
+                .WithColor(Discord.Color.Green)
+                .WithFooter(footer =>
+                {
+                    footer.Text = $"Requested by {Context.User.Username}";
+                    footer.IconUrl = Context.User.GetAvatarUrl();
+                });
+
+            await ReplyAsync(embed: listEmbed.Build()).ConfigureAwait(false);
         }
         
 
-        [Command("villagerName")]
-        [Alias("vn", "nv", "name")]
-        [Summary("Gets the internal name of a villager.")]
-        [RequireQueueRole(nameof(Globals.Bot.Config.RoleUseBot))]
-        public async Task GetVillagerInternalNameAsync([Summary("Language code to search with")] string language, [Summary("Villager name")][Remainder] string villagerName)
-        {
-            var strings = GameInfo.GetStrings(language);
-            await ReplyVillagerName(strings, villagerName).ConfigureAwait(false);
-        }
+        
 
         [Command("villagerName")]
         [Alias("vn", "nv", "name")]
@@ -142,18 +154,67 @@ namespace SysBot.ACNHOrders
         {
             if (!Globals.Bot.Config.AllowLookup)
             {
-                await ReplyAsync($"{Context.User.Mention} - Lookup commands are not accepted.");
+                var disabledEmbed = new Discord.EmbedBuilder()
+                    .WithTitle("Lookup Disabled")
+                    .WithDescription($"{Context.User.Mention} - Lookup commands are not accepted.")
+                    .WithColor(Discord.Color.Orange)
+                    .WithFooter(footer => footer.Text = $"Requested by {Context.User.Username}");
+
+                await ReplyAsync(embed: disabledEmbed.Build()).ConfigureAwait(false);
                 return;
             }
 
+            // Sanitize input: remove spaces and lowercase anything that was after the first space
+            var sanitizedInput = villagerName ?? string.Empty;
+            if (sanitizedInput.Contains(' '))
+            {
+                var parts = sanitizedInput
+                    .Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+                if (parts.Length > 0)
+                {
+                    var first = parts[0];
+                    var rest = parts.Skip(1)
+                                    .Select(p => p.ToLowerInvariant());
+
+                    sanitizedInput = first + string.Concat(rest);
+                }
+                else
+                {
+                    sanitizedInput = string.Empty;
+                }
+            }
+
+            // Defensive: remove any remaining spaces
+            sanitizedInput = sanitizedInput.Replace(" ", string.Empty);
+
             var map = strings.VillagerMap;
-            var result = map.FirstOrDefault(z => string.Equals(villagerName, z.Value.Replace(" ", string.Empty), StringComparison.InvariantCultureIgnoreCase));
+            var result = map.FirstOrDefault(z =>
+                string.Equals(sanitizedInput, z.Value.Replace(" ", string.Empty), StringComparison.InvariantCultureIgnoreCase));
+
             if (string.IsNullOrWhiteSpace(result.Key))
             {
-                await ReplyAsync($"No villager found of name {villagerName}.").ConfigureAwait(false);
+                var notFoundEmbed = new Discord.EmbedBuilder()
+                    .WithTitle("Villager Not Found")
+                    .WithDescription($"No villager found for name `{villagerName}`.")
+                    .WithColor(Discord.Color.Red)
+                    .WithTimestamp(DateTimeOffset.UtcNow);
+
+                await ReplyAsync(embed: notFoundEmbed.Build()).ConfigureAwait(false);
                 return;
             }
-            await ReplyAsync($"{villagerName}={result.Key}").ConfigureAwait(false);
+
+            // Remove spaces and lowercase the name
+            var successEmbed = new Discord.EmbedBuilder()
+                .WithTitle($"Search results for \"{villagerName}\"")
+                .WithColor(Discord.Color.Green)
+                .AddField("Villager Name", result.Value ?? "Unknown", inline: true)
+                .AddField("Internal Name", result.Key ?? "Unknown", inline: true)
+                .AddField("Order Format", $"villager:{result.Key}", inline: false)
+                .WithThumbnailUrl($"https://raw.githubusercontent.com/ThatOneCrab/ACNH-Sprites/refs/heads/main/{sanitizedInput}_nh.png")
+                .WithTimestamp(DateTimeOffset.UtcNow);
+
+            await ReplyAsync(embed: successEmbed.Build()).ConfigureAwait(false);
         }
     }
 }

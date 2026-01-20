@@ -5,6 +5,9 @@
     <TargetFrameworks>net10.0</TargetFrameworks>
     <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
+    <ApplicationIcon>tom_nook.ico</ApplicationIcon>
+    <Company>$(Authors)</Company>
+    <Authors>ThatOneCrab</Authors>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,6 +18,10 @@
 
   <ItemGroup>
     <None Remove="Resources\InternalHexList.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="tom_nook.ico" />
   </ItemGroup>
 
   <ItemGroup>

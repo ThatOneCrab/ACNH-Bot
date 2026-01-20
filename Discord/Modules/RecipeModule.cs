@@ -19,7 +19,7 @@ namespace SysBot.ACNHOrders
         {
             if (!Globals.Bot.Config.AllowLookup)
             {
-                await ReplyAsync($"{Context.User.Mention} - Lookup commands are not accepted.");
+                await ReplyAsync($"{Context.User.Mention} - Lookup commands are not accepted.").ConfigureAwait(false);
                 return;
             }
 
@@ -35,7 +35,7 @@ namespace SysBot.ACNHOrders
         {
             if (!Globals.Bot.Config.AllowLookup)
             {
-                await ReplyAsync($"{Context.User.Mention} - Lookup commands are not accepted.");
+                await ReplyAsync($"{Context.User.Mention} - Lookup commands are not accepted.").ConfigureAwait(false);
                 return;
             }
 
@@ -46,12 +46,19 @@ namespace SysBot.ACNHOrders
         private async Task PrintItemsAsync(string itemName, IReadOnlyList<ComboItem> strings)
         {
             const int minLength = 2;
-            if (itemName.Length <= minLength)
+            if (string.IsNullOrWhiteSpace(itemName) || itemName.Length <= minLength)
             {
-                await ReplyAsync($"Please enter a search term longer than {minLength} characters.").ConfigureAwait(false);
+                var embedErr = new EmbedBuilder()
+                    .WithTitle("Search Error")
+                    .WithDescription($"Please enter a search term longer than {minLength} characters.")
+                    .WithColor(Color.Orange)
+                    .Build();
+
+                await ReplyAsync(embed: embedErr).ConfigureAwait(false);
                 return;
             }
 
+            // Exact match first
             foreach (var item in strings)
             {
                 if (!string.Equals(item.Text, itemName, StringComparison.OrdinalIgnoreCase))
@@ -59,15 +66,30 @@ namespace SysBot.ACNHOrders
 
                 if (!ItemParser.InvertedRecipeDictionary.TryGetValue((ushort)item.Value, out var recipeID))
                 {
-                    await ReplyAsync("Requested item is not a DIY recipe.").ConfigureAwait(false);
+                    var notDiy = new EmbedBuilder()
+                        .WithTitle("Not a DIY")
+                        .WithDescription("Requested item is not a DIY recipe.")
+                        .WithColor(Color.DarkGrey)
+                        .Build();
+
+                    await ReplyAsync(embed: notDiy).ConfigureAwait(false);
                     return;
                 }
 
-                var msg = $"{item.Value:X4} {item.Text}: Recipe order code: {recipeID:X3}000016A2";
-                await ReplyAsync(Format.Code(msg)).ConfigureAwait(false);
+                var embed = new EmbedBuilder()
+                    .WithTitle("DIY Recipe Found")
+                    .AddField("Item", item.Text, true)
+                    .AddField("ID (hex)", $"`{item.Value:X4}`", true)
+                    .AddField("Recipe order code", $"`{recipeID:X3}000016A2`")
+                    .WithColor(Color.Green)
+                    .WithFooter($"Search: {itemName}")
+                    .Build();
+
+                await ReplyAsync(embed: embed).ConfigureAwait(false);
                 return;
             }
 
+            // Fuzzy matches
             var items = ItemParser.GetItemsMatching(itemName, strings).ToArray();
             var matches = new List<string>();
             foreach (var item in items)
@@ -75,22 +97,36 @@ namespace SysBot.ACNHOrders
                 if (!ItemParser.InvertedRecipeDictionary.TryGetValue((ushort)item.Value, out var recipeID))
                     continue;
 
-                var msg = $"{item.Value:X4} {item.Text}: Recipe order code: {recipeID:X3}000016A2";
-                matches.Add(msg);
+                matches.Add($"{item.Value:X4} {item.Text}: {recipeID:X3}000016A2");
             }
 
-            var result = string.Join(Environment.NewLine, matches);
-            if (result.Length == 0)
+            if (matches.Count == 0)
             {
-                await ReplyAsync("No matches found.").ConfigureAwait(false);
+                var noMatches = new EmbedBuilder()
+                    .WithTitle("No matches found ")
+                    .WithDescription($" No items matched your search for \"{itemName}\".")
+                    .WithColor(Color.Red)
+                    .WithTimestamp(DateTimeOffset.UtcNow)
+                    .Build();
+
+                await ReplyAsync(embed: noMatches).ConfigureAwait(false);
                 return;
             }
 
-            const int maxLength = 500;
+            var result = string.Join(Environment.NewLine, matches);
+            const int maxLength = 2000;
             if (result.Length > maxLength)
                 result = result.Substring(0, maxLength) + "...[truncated]";
 
-            await ReplyAsync(Format.Code(result)).ConfigureAwait(false);
+            var embedMatches = new EmbedBuilder()
+                .WithTitle($"Search results for \"{itemName}\"")
+                .WithDescription($"```text\n{result}\n```")
+                .WithColor(Color.Blue)
+                .WithFooter($"{matches.Count} matches")
+                .WithTimestamp(DateTimeOffset.UtcNow)
+                .Build();
+
+            await ReplyAsync(embed: embedMatches).ConfigureAwait(false);
         }
     }
 }

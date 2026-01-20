@@ -36,21 +36,56 @@ namespace SysBot.ACNHOrders
         public void OrderCancelled(CrossBot routine, string msg, bool faulted)
         {
             OnFinish?.Invoke(routine);
-            Trader.SendMessageAsync($"Oops! Something has happened with your order: {msg}");
+
+            var embed = new EmbedBuilder()
+                .WithTitle("Order Cancelled")
+                .WithColor(Color.Red)
+                .WithDescription(msg)
+                .WithTimestamp(DateTimeOffset.UtcNow)
+                .Build();
+
+            // Send DM to the trader
+            Trader.SendMessageAsync(embed: embed);
+
+            // Also notify the command channel when the cancellation was user-visible (not a fault)
             if (!faulted)
-                CommandSentChannel.SendMessageAsync($"{Trader.Mention} - Your order has been cancelled: {msg}");
+                CommandSentChannel.SendMessageAsync(text: $"{Trader.Mention} - Your order has been cancelled:", embed: embed);
         }
 
         public void OrderInitializing(CrossBot routine, string msg)
         {
-            Trader.SendMessageAsync($"Your order is starting, please **ensure your inventory is __empty__**, then go talk to Orville and stay on the Dodo code entry screen. I will send you the Dodo code shortly. {msg}");
+            var embed = new EmbedBuilder()
+                .WithTitle("Order Initializing")
+                .WithColor(Color.Gold)
+                .WithDescription("Please ensure your inventory is **empty**, then talk to Orville and stay on the Dodo code entry screen. I will send your Dodo code shortly.")
+                .WithFooter(footer => footer.WithText("ACNH Orders"))
+                .WithTimestamp(DateTimeOffset.UtcNow)
+                .Build();
+
+            try
+            {
+                Trader.SendMessageAsync(embed: embed);
+            }
+            catch (Exception e)
+            {
+                LogUtil.LogError("Failed sending order initializing embed: " + e.Message + "\n" + e.StackTrace, "Discord");
+            }
         }
 
         public void OrderReady(CrossBot routine, string msg, string dodo)
         {
             try
             {
-                Trader.SendMessageAsync($"I'm waiting for you {Trader.Mention}! {msg}. Your Dodo code is **{dodo}**");
+                var embed = new EmbedBuilder()
+                    .WithTitle("Order Ready")
+                    .WithColor(Color.Green)
+                    .WithDescription($"{Trader.Mention} I'm waiting for you! {(!string.IsNullOrWhiteSpace(msg) ? msg : string.Empty)}")
+                    .AddField("Dodo Code", $" {dodo}", true)
+                    .WithFooter(footer => footer.WithText("ACNH Orders"))
+                    .WithTimestamp(DateTimeOffset.UtcNow)
+                    .Build();
+
+                Trader.SendMessageAsync(embed: embed);
             }
             catch (Exception e)
             {
@@ -61,7 +96,23 @@ namespace SysBot.ACNHOrders
         public void OrderFinished(CrossBot routine, string msg)
         {
             OnFinish?.Invoke(routine);
-            Trader.SendMessageAsync($"Your order is complete, Thanks for your order! {msg}");
+
+            var embed = new EmbedBuilder()
+                .WithTitle("Order Complete")
+                .WithColor(Color.Green)
+                .WithDescription(string.IsNullOrWhiteSpace(msg) ? "Your order is complete. Thanks for your order!" : $"Your order is complete. {msg}")
+                .WithFooter(footer => footer.WithText("ACNH Orders"))
+                .WithTimestamp(DateTimeOffset.UtcNow)
+                .Build();
+
+            try
+            {
+                Trader.SendMessageAsync(embed: embed);
+            }
+            catch (Exception e)
+            {
+                LogUtil.LogError("Failed sending order finished embed: " + e.Message + "\n" + e.StackTrace, "Discord");
+            }
         }
 
         public void SendNotification(CrossBot routine, string msg)

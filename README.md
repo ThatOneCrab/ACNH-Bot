@@ -11,6 +11,8 @@ Alternatively, you may use this as a fully automated connection, logging, advanc
 
 [kwsch](https://github.com/kwsch) for the original project and everything that makes this work.
 
+[berichan](https://github.com/berichan/SysBot.ACNHOrders) for the build this is built on
+
 [Red](https://github.com/hp3721) for the original Dodo-fetch code, pointer logic and a bunch of other things that make this possible.
 
 Resources:
@@ -23,7 +25,7 @@ Resources:
 
 ## Support Discord:
 
-[<img src="https://canary.discordapp.com/api/guilds/771477382409879602/widget.png?style=banner2">](https://discord.gg/5bT8XK8dYe)
+[<img src="https://canary.discordapp.com/api/guilds/1375740071843598466/widget.png?style=banner2">](https://discord.gg/FnAGV4pb2k)
 
 [sys-botbase](https://github.com/olliz0r/sys-botbase) client for remote control automation of Nintendo Switch consoles.
 
@@ -34,3 +36,7 @@ Animal Crossing API logic is provided by [NHSE](https://github.com/kwsch/NHSE/).
 
 # License
 Refer to the `License.md` for details regarding licensing.
+
+
+
+
