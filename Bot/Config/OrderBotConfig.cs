@@ -19,10 +19,10 @@ namespace SysBot.ACNHOrders
         }
 
         /// <summary> Maximum amount of time in seconds before a user is kicked from your island to avoid loiterers. Minimum is 2 minutes (120 seconds). </summary>
-        public int UserTimeAllowed 
-        { 
-            get => _timeAllowed; 
-            set => _timeAllowed = Math.Max(120, value); 
+        public int UserTimeAllowed
+        {
+            get => _timeAllowed;
+            set => _timeAllowed = Math.Max(120, value);
         }
 
         /// <summary> Maximum amount of time to wait until they're a no-show and the bot restarts in seconds. </summary>
@@ -54,5 +54,8 @@ namespace SysBot.ACNHOrders
 
         /// <summary> Send messages of orders starting/arriving in the echo channels </summary>
         public List<ulong> EchoArrivingLeavingChannels { get; set; } = new();
+
+        /// <summary> How much extra time to wait for arrivals in ms </summary>
+        public int ArrivalExtraWaitTime { get; set; } = 1000;
     }
 }

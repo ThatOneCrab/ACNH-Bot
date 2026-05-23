@@ -19,22 +19,26 @@ variables:
   Configuration: 'Release'
 
 steps:
+- task: UseDotNet@2
+  displayName: 'Install .NET 10 SDK'
+  inputs:
+    version: '10.x'
+    includePreviewVersions: true
+
 - task: NuGetToolInstaller@1
 
-- task: NuGetCommand@2
-  inputs:
-    command: 'restore'
-    restoreSolution: '**/*.sln'
-    
 - task: DotNetCoreCLI@2
+  displayName: 'Restore'
   inputs:
     command: 'restore'
+    projects: '$(Solution)'
 
-- task: VSBuild@1
+- task: DotNetCoreCLI@2
+  displayName: 'Build project'
   inputs:
-    solution: '$(Solution)'
-    platform: '$(Platform)'
-    configuration: '$(Configuration)'
+    command: 'build'
+    projects: '$(Solution)'
+    arguments: '--configuration $(Configuration)'
 
 - task: PublishBuildArtifacts@1
   displayName: 'Publish Artifact: SysBot-ACNH-Orders'

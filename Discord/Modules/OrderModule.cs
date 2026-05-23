@@ -372,8 +372,8 @@ namespace SysBot.ACNHOrders
                 return;
             }
 
-            order.SkipRequested = true;
-            await ReplyAsync($"{Context.User.Mention} - Your order has been removed. Please note that you will not be able to rejoin the queue again for a while.").ConfigureAwait(false);
+            Globals.Hub.Orders.RemoveByUserId(Context.User.Id);
+            await ReplyAsync($"{Context.User.Mention} - Your order has been removed. You can rejoin the queue at any time.").ConfigureAwait(false);
         }
 
         [Command("removeUser")]
@@ -391,7 +391,7 @@ namespace SysBot.ACNHOrders
                     return;
                 }
 
-                order.SkipRequested = true;
+                Globals.Hub.Orders.RemoveByUserId(res);
                 await ReplyAsync($"{identity} ({order.VillagerName}) has been removed from the queue.").ConfigureAwait(false);
             }
             else
@@ -529,7 +529,9 @@ namespace SysBot.ACNHOrders
 
             if (!InternalItemTool.CurrentInstance.IsSaneAfterCorrection(items, Globals.Bot.Config.DropConfig))
             {
-                await ReplyAsync($"{Context.User.Mention} - You are attempting to order items that will damage your save. Order not accepted.");
+                var unsafeItems = InternalItemTool.CurrentInstance.GetUnsafeItemNames(items);
+                var unsafeList = string.Join(", ", unsafeItems);
+                await ReplyAsync($"{Context.User.Mention} - You are attempting to order items that will damage your save. Order not accepted.\r\nThe following item(s) are not safe: {unsafeList}");
                 return;
             }
 
@@ -692,8 +694,6 @@ namespace SysBot.ACNHOrders
             "xct",
             "brd20",
             "der12",
-            "squ19",
-            "squ20"
         };
 
         public static bool IsUnadoptable(string? internalName) => UnadoptableVillagers.Contains(internalName == null ? string.Empty : internalName.Trim().ToLower());

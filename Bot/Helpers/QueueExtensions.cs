@@ -83,31 +83,19 @@ namespace SysBot.ACNHOrders
         // this sucks
         private static bool AttemptAddToQueue(IACNHOrderNotifier<Item> itemReq, string traderMention, string traderDispName, out Embed statusEmbed)
         {
-                    var orders = Globals.Hub.Orders;
-                    var orderArray = orders.ToArray();
-                    var order = Array.Find(orderArray, x => x.UserGuid == itemReq.UserGuid);
-                    if (order != null)
-                    {
-                        var eb = new EmbedBuilder()
-                            .WithTitle("Queue Error")
-                            .WithColor(Color.Red)
-                            .WithFooter(footer => footer.WithText("ACNH Orders"))
-                            .WithCurrentTimestamp();
+            var orders = Globals.Hub.Orders;
+            var existingOrder = orders.GetByUserId(itemReq.UserGuid);
+            if (existingOrder != null)
+            {
+                var eb = new EmbedBuilder()
+                    .WithTitle("Queue Error")
+                    .WithColor(Color.Red)
+                    .WithDescription($"{traderMention} - Sorry, you are already in the queue.")
+                    .WithFooter(footer => footer.WithText("ACNH Orders"))
+                    .WithCurrentTimestamp();
 
-                        if (!order.SkipRequested)
-                        {
-                            eb.WithDescription($"{traderMention} - Sorry, you are already in the queue.");
-                        }
-                        else
-                        {
-                            eb.WithDescription($"{traderMention} - You have been recently removed from the queue. Please wait a while before attempting to enter the queue again.");
-                        }
-
-                        // Optionally add an action field to guide the user
-                        eb.AddField("Action", "If you believe this is a mistake, wait a few moments and try again or contact a moderator.", inline: false);
-
-                        statusEmbed = eb.Build();
-                        return false;
+                statusEmbed = eb.Build();
+                return false;
             }
 
             if (Globals.Bot.CurrentUserName == traderDispName)
@@ -124,7 +112,7 @@ namespace SysBot.ACNHOrders
                 return false;
             }
 
-            var position = orderArray.Length + 1;
+            var position = orders.Count + 1;
             var idToken = Globals.Bot.Config.OrderConfig.ShowIDs ? $" (ID {itemReq.OrderID})" : string.Empty;
             var baseMsg = $"{traderMention} - Added you to the order queue{idToken}. Your position is: **{position}**";
 
@@ -157,14 +145,15 @@ namespace SysBot.ACNHOrders
         public static int GetPosition(ulong id, out OrderRequest<Item>? order)
         {
             var orders = Globals.Hub.Orders;
-            var orderArray = orders.ToArray().Where(x => !x.SkipRequested).ToArray();
-            var orderFound = Array.Find(orderArray, x => x.UserGuid == id);
-            if (orderFound != null && !orderFound.SkipRequested)
+            var position = orders.GetPosition(id);
+
+            if (position > 0)
             {
-                if (orderFound is OrderRequest<Item> oreq)
+                var found = orders.GetByUserId(id);
+                if (found is OrderRequest<Item> oreq)
                 {
                     order = oreq;
-                    return Array.IndexOf(orderArray, orderFound) + 1;
+                    return position;
                 }
             }
 
@@ -204,7 +193,7 @@ namespace SysBot.ACNHOrders
         public static string GetQueueString()
         {
             var orders = Globals.Hub.Orders;
-            var orderArray = orders.ToArray().Where(x => !x.SkipRequested).ToArray();
+            var orderArray = orders.ToArray();
             string orderString = string.Empty;
             foreach (var ord in orderArray)
                 orderString += $"{ord.VillagerName} \r\n";

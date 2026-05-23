@@ -19,7 +19,7 @@ namespace SysBot.ACNHOrders
     {
         private const string ACNH_PROGRAM_ID = "01006F8002326000";
 
-        private ConcurrentQueue<IACNHOrderNotifier<Item>> Orders => QueueHub.CurrentInstance.Orders;
+        private OrderQueue<IACNHOrderNotifier<Item>> Orders => QueueHub.CurrentInstance.Orders;
         private uint InventoryOffset { get; set; } = (uint)OffsetHelper.InventoryOffset;
 
         public readonly ConcurrentQueue<ItemRequest> Injections = new();
@@ -41,7 +41,7 @@ namespace SysBot.ACNHOrders
 
         public readonly DodoDraw? DodoImageDrawer;
 
-        public MapTerrainLite Map { get; private set; } = new MapTerrainLite(new byte[MapGrid.MapTileCount32x32 * Item.SIZE]);
+        public MapTerrainLite Map { get; private set; } = new MapTerrainLite(new byte[OffsetHelper.LegacyMapTileCount32x32 * Item.SIZE]);
         public TimeBlock LastTimeState { get; private set; } = new();
         public bool CleanRequested { private get; set; }
         public bool RestoreRestartRequested { private get; set; }
@@ -62,15 +62,12 @@ namespace SysBot.ACNHOrders
         public VillagerHelper Villagers { get; private set; } = VillagerHelper.Empty;
 
         private readonly RegionScreenshotComparer LoadingScreenPixelComparer = new RegionScreenshotComparer(274, 24, 1, 1, new Rgba32(2, 2, 2, 255), 2);
-
+        public ISwitchConnectionAsync SwitchConnectedConnection => SwitchConnection;
         public CrossBot(CrossBotConfig cfg) : base(cfg)
         {
             State = new DropBotState(cfg.DropConfig);
             Anchors = new AnchorHelper(Config.AnchorFilename);
-            if (Connection is ISwitchConnectionAsync con)
-                SwitchConnection = con;
-            else
-                throw new Exception("Connection is null.");
+            
 
             if (Connection is SwitchSocketAsync ssa)
                 ssa.MaximumTransferSize = cfg.MapPullChunkSize;
@@ -91,13 +88,13 @@ namespace SysBot.ACNHOrders
         public override async Task MainLoop(CancellationToken token)
         {
             // Validate map spawn vector
-            if (Config.MapPlaceX < 0 || Config.MapPlaceX >= (MapGrid.AcreWidth * 32))
+            if (Config.MapPlaceX < 0 || Config.MapPlaceX >= ((int)OffsetHelper.LegacyAcreWidth * 32))
             {
                 LogUtil.LogInfo($"{Config.MapPlaceX} is not a valid value for {nameof(Config.MapPlaceX)}. Exiting!", Config.IP);
                 return;
             }
 
-            if (Config.MapPlaceY < 0 || Config.MapPlaceY >= (MapGrid.AcreHeight * 32))
+            if (Config.MapPlaceY < 0 || Config.MapPlaceY >= ((int)OffsetHelper.LegacyAcreHeight * 32))
             {
                 LogUtil.LogInfo($"{Config.MapPlaceY} is not a valid value for {nameof(Config.MapPlaceY)}. Exiting!", Config.IP);
                 return;
@@ -443,7 +440,7 @@ namespace SysBot.ACNHOrders
 
             await EnsureAnchorsAreInitialised(token);
 
-            if (Orders.TryDequeue(out var item) && !item.SkipRequested)
+            if (Orders.TryDequeue(out var item) && item != null)
             {
                 var result = await ExecuteOrder(item, token).ConfigureAwait(false);
 
@@ -834,11 +831,12 @@ namespace SysBot.ACNHOrders
                 await AttemptEchoHook($"> Visitor arriving: {order.VillagerName}", Config.OrderConfig.EchoArrivingLeavingChannels, token).ConfigureAwait(false);
 
             // Wait for arrival animation (flight board, arrival through gate, terrible dodo seaplane joke, etc)
-            await Task.Delay(10_000, token).ConfigureAwait(false);
+            await Task.Delay(10_000 + Config.OrderConfig.ArrivalExtraWaitTime, token).ConfigureAwait(false);
 
             OverworldState state = OverworldState.Unknown;
             bool isUserArriveLeaving = false;
-            // Ensure we're on overworld before starting timer/drop loop
+            // Ensure we're on overworld before starting timer/drop loop, or wait for timeout
+            int timer = 150;
             while (state != OverworldState.Overworld)
             {
                 state = await DodoPosition.GetOverworldState(OffsetHelper.PlayerCoordJumps, token).ConfigureAwait(false);
@@ -856,11 +854,15 @@ namespace SysBot.ACNHOrders
                     isUserArriveLeaving = false;
                 }
 
-                await VisitorList.UpdateNames(token).ConfigureAwait(false);
-                if (VisitorList.VisitorCount < 2)
-                    break;
-            }
-
+                if (timer-- < 1)
+                {
+                    // Took too long, cancel their order
+                    LogUtil.LogError($"Visitor took too long to arrive. Removed from queue, moving to next order.", Config.IP);
+                    order.OrderCancelled(this, "You took too long to arrive, this is likely due to a connection issue. Your request has been removed.", false);
+                    return OrderResult.NoArrival;
+                }
+                }
+            LogUtil.LogInfo($"Visitor has arrived. Starting countdown.", Config.IP);
             await UpdateBlocker(false, token).ConfigureAwait(false);
 
             // Update current user Id such that they may use drop commands
@@ -936,9 +938,7 @@ namespace SysBot.ACNHOrders
                 await Task.Delay(3_500 + Config.RestartGameWait, token).ConfigureAwait(false);
             }
         startgame:
-            if (Config.AvoidSystemUpdate)
-                await SwitchConnection.ClearUpdate(token).ConfigureAwait(false);
-
+            
             await Click(SwitchButton.A, 1_000 + Config.RestartGameWait, token).ConfigureAwait(false);
 
             // Click away from any system updates if requested

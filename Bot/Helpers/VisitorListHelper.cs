@@ -44,7 +44,7 @@ namespace SysBot.ACNHOrders
 
         private readonly ISwitchConnectionAsync Connection;
         private readonly CrossBot BotRunner;
-        private readonly CrossBotConfig Config;
+        
 
         public string[] Visitors { get; private set; } = new string[VisitorListSize];
 
@@ -55,8 +55,8 @@ namespace SysBot.ACNHOrders
         public VisitorListHelper(CrossBot bot)
         {
             BotRunner = bot;
-            Connection = BotRunner.SwitchConnection;
-            Config = BotRunner.Config;
+            Connection = BotRunner.SwitchConnectedConnection;
+           
             LastVisitorDiff = new VisitorDifference(Visitors);
         }
 
@@ -65,7 +65,7 @@ namespace SysBot.ACNHOrders
         public async Task<IReadOnlyCollection<VisitorDifference.Difference>> UpdateNames(CancellationToken token)
         {
             var formattedList = $"The following visitors are on {TownName}:\n";
-            var baseOffset = await Connection.PointerAll(OffsetHelper.VillagerListJumps, token).ConfigureAwait(false); ;
+            var baseOffset = await Connection.PointerAll(OffsetHelper.VillagerListJumps, token).ConfigureAwait(false);
             VisitorCount = 0;
             for (uint i = 0; i < VisitorListSize; ++i)
             {
