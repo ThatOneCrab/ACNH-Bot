@@ -112,7 +112,15 @@ namespace SysBot.ACNHOrders
             // get version
             await Task.Delay(0_100, token).ConfigureAwait(false);
             LogUtil.LogInfo("Attempting get version. Please wait...", Config.IP);
-            string version = await SwitchConnection.GetVersionAsync(token).ConfigureAwait(false);
+
+            var sw = SwitchConnection ?? (Connection as ISwitchConnectionAsync);
+            if (sw == null)
+            {
+                LogUtil.LogError("SwitchConnection is not initialized.", Config.IP);
+                throw new InvalidOperationException("SwitchConnection is not initialized.");
+            }
+
+            string version = await sw.GetVersionAsync(token).ConfigureAwait(false);
             LogUtil.LogInfo($"sys-botbase version identified as: {version}", Config.IP);
 
             // ensure game is running
@@ -265,7 +273,15 @@ namespace SysBot.ACNHOrders
                 {
                     await Task.Delay(2_000, token).ConfigureAwait(false);
 
-                    ChargePercent = await SwitchConnection.GetChargePercentAsync(token).ConfigureAwait(false);
+                    // Use safe connection
+                    var conn = GetSwitchConn();
+                    if (conn == null)
+                    {
+                        LogUtil.LogError("No ISwitchConnectionAsync available while in DodoRestoreLoop.", Config.IP);
+                        throw new InvalidOperationException("Switch connection is not initialized.");
+                    }
+
+                    ChargePercent = await conn.GetChargePercentAsync(token).ConfigureAwait(false);
 
                     if (RestoreRestartRequested)
                     {
@@ -305,10 +321,10 @@ namespace SysBot.ACNHOrders
                         if (Config.DodoModeConfig.EchoArrivalChannels.Count > 0)
                             await AttemptEchoHook($"> [{DateTime.Now:yyyy-MM-dd hh:mm:ss tt}] 🛬 {LastArrival} from {LastArrivalIsland} is joining {TownName}.{(Config.DodoModeConfig.PostDodoCodeWithNewArrivals ? $" Dodo code is: {DodoCode}." : string.Empty)}", Config.DodoModeConfig.EchoArrivalChannels, token).ConfigureAwait(false);
 
-                        var nid = await SwitchConnection.PointerPeek(8, OffsetHelper.VillagerArrivingNIDJumps, token).ConfigureAwait(false);
+                        var nid = await conn.PointerPeek(8, OffsetHelper.VillagerArrivingNIDJumps, token).ConfigureAwait(false);
 
                         var islandArriverAddress = await DodoPosition.FollowMainPointer(OffsetHelper.VillagerArrivingJumps, token).ConfigureAwait(false);
-                        var arriver = await JoiningVillagerHelper.FetchVillager(islandArriverAddress, SwitchConnection, token).ConfigureAwait(false);
+                        var arriver = await JoiningVillagerHelper.FetchVillager(islandArriverAddress, conn, token).ConfigureAwait(false);
                         var islandId = arriver.IslandID;
 
                         bool IsSafeNewAbuse = true;
@@ -328,7 +344,7 @@ namespace SysBot.ACNHOrders
                         await Task.Delay(60_000, token).ConfigureAwait(false);
 
                         // Clear username of last arrival
-                        await JoiningVillagerHelper.ClearVillager(islandArriverAddress, SwitchConnection, token).ConfigureAwait(false);
+                        await JoiningVillagerHelper.ClearVillager(islandArriverAddress, conn, token).ConfigureAwait(false);
                         LastArrival = string.Empty;
                     }
 
@@ -361,7 +377,7 @@ namespace SysBot.ACNHOrders
                         if (!Config.DodoModeConfig.FreezeMap)
                             await ClearMapAndSpawnInternally(null, Map, Config.DodoModeConfig.RefreshTerrainData, token, true).ConfigureAwait(false);
                         else
-                            await SwitchConnection.FreezeValues((uint)OffsetHelper.FieldItemStartLayer1, Map.StartupBytes, ConnectionHelper.MapChunkCount, token).ConfigureAwait(false);
+                            await conn.FreezeValues((uint)OffsetHelper.FieldItemStartLayer1, Map.StartupBytes, ConnectionHelper.MapChunkCount, token).ConfigureAwait(false);
 
                         await AttemptEchoHook($"{TownName} has switched to item layer: {mapRequest.OverrideLayerName}", Config.DodoModeConfig.EchoIslandUpdateChannels, token).ConfigureAwait(false);
                         await SaveLayerNameToFile(Path.GetFileNameWithoutExtension(mapRequest.OverrideLayerName), token).ConfigureAwait(false);
@@ -457,7 +473,32 @@ namespace SysBot.ACNHOrders
                 GameIsDirty = true;
             LastTimeState = newTimeState;
 
-            ChargePercent = await SwitchConnection.GetChargePercentAsync(token).ConfigureAwait(false);
+            // Use the explicit SwitchConnection if available, otherwise fall back to Connection cast.
+            var sw = SwitchConnection ?? (Connection as ISwitchConnectionAsync);
+            if (sw != null)
+            {
+                try
+                {
+                    ChargePercent = await sw.GetChargePercentAsync(token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // If canceled propagate
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Defensive: log and preserve previous or default value
+                    LogUtil.LogError($"Failed to get charge percent: {ex.Message}", Config.IP);
+                    // keep ChargePercent as-is (or set a sensible default)
+                    if (ChargePercent < 0 || ChargePercent > 100)
+                        ChargePercent = 100;
+                }
+            }
+            else
+            {
+                LogUtil.LogInfo("No ISwitchConnectionAsync available to query charge percent. Using last known value.", Config.IP);
+            }
 
             await Task.Delay(1_000, token).ConfigureAwait(false);
         }
@@ -504,7 +545,11 @@ namespace SysBot.ACNHOrders
                 GlobalBan.Penalize(order.UserGuid.ToString());
 
             // Clear username of last arrival
-            await JoiningVillagerHelper.ClearVillager(await DodoPosition.FollowMainPointer(OffsetHelper.VillagerArrivingJumps, token).ConfigureAwait(false), SwitchConnection, token).ConfigureAwait(false);
+            var conn = GetSwitchConn();
+            if (conn != null)
+                await JoiningVillagerHelper.ClearVillager(await DodoPosition.FollowMainPointer(OffsetHelper.VillagerArrivingJumps, token).ConfigureAwait(false), conn, token).ConfigureAwait(false);
+            else
+                LogUtil.LogInfo("Skipping ClearVillager at end of ExecuteOrder because no switch connection is available.", Config.IP);
 
             return result;
         }
@@ -732,7 +777,13 @@ namespace SysBot.ACNHOrders
             }
 
             // Clear username of last arrival (again)
-            await JoiningVillagerHelper.ClearVillager(await DodoPosition.FollowMainPointer(OffsetHelper.VillagerArrivingJumps, token).ConfigureAwait(false), SwitchConnection, token).ConfigureAwait(false);
+            var conn = GetSwitchConn();
+            if (conn == null)
+            {
+                LogUtil.LogError("Clear last arrival called but no ISwitchConnectionAsync is available.", Config.IP);
+                throw new InvalidOperationException("Switch connection is not initialized.");
+            }
+            await JoiningVillagerHelper.ClearVillager(await DodoPosition.FollowMainPointer(OffsetHelper.VillagerArrivingJumps, token).ConfigureAwait(false), conn, token).ConfigureAwait(false);
             LastArrival = string.Empty;
 
             if (DodoImageDrawer != null)
@@ -782,11 +833,18 @@ namespace SysBot.ACNHOrders
                 }
             }
 
-            var nid = await SwitchConnection.PointerPeek(8, OffsetHelper.VillagerArrivingNIDJumps, token).ConfigureAwait(false);
+            var conn2 = GetSwitchConn();
+            if (conn2 == null)
+            {
+                LogUtil.LogError("Expected switch connection for arrival handling but none was available.", Config.IP);
+                throw new InvalidOperationException("Switch connection is not initialized.");
+            }
+
+            var nid = await conn2.PointerPeek(8, OffsetHelper.VillagerArrivingNIDJumps, token).ConfigureAwait(false);
 
             var islandArriverAddress = await DodoPosition.FollowMainPointer(OffsetHelper.VillagerArrivingJumps, token).ConfigureAwait(false);
-            var arriver = await JoiningVillagerHelper.FetchVillager(islandArriverAddress, SwitchConnection, token).ConfigureAwait(false);
-            var islandId = arriver.IslandID;
+            var arriver2 = await JoiningVillagerHelper.FetchVillager(islandArriverAddress, conn2, token).ConfigureAwait(false);
+            var islandId = arriver2.IslandID;
 
             bool IsSafeNewAbuse = true;
             try
@@ -984,8 +1042,16 @@ namespace SysBot.ACNHOrders
 
         private async Task EnterAirport(CancellationToken token)
         {
+            // Acquire a usable ISwitchConnectionAsync (fall back to base Connection if needed)
+            var conn = GetSwitchConn();
+            if (conn == null)
+            {
+                LogUtil.LogError("EnterAirport called but no ISwitchConnectionAsync is available.", Config.IP);
+                throw new InvalidOperationException("Switch connection is not initialized.");
+            }
+
             // Pause any freezers to account for loading screen lag
-            await SwitchConnection.SetFreezePauseState(true, token).ConfigureAwait(false);
+            await conn.SetFreezePauseState(true, token).ConfigureAwait(false);
             await Task.Delay(0_200 + Config.ExtraTimeEnterAirportWait, token).ConfigureAwait(false);
 
             int tries = 0;
@@ -1006,7 +1072,7 @@ namespace SysBot.ACNHOrders
 
                 if (!isLoadingScreen)
                 {
-                    isLoadingScreen = await CompareScreenImageAsync(SwitchConnection, LoadingScreenPixelComparer, token).ConfigureAwait(false);
+                    isLoadingScreen = await CompareScreenImageAsync(conn, LoadingScreenPixelComparer, token).ConfigureAwait(false);
                     if (isLoadingScreen)
                         LogUtil.LogInfo("Loading screen detected.", Config.IP);
                 }
@@ -1018,14 +1084,14 @@ namespace SysBot.ACNHOrders
 
             await Task.Delay(1_000, token).ConfigureAwait(false);
             state = await DodoPosition.GetOverworldState(OffsetHelper.PlayerCoordJumps, token).ConfigureAwait(false);
-            isLoadingScreen = await CompareScreenImageAsync(SwitchConnection, LoadingScreenPixelComparer, token).ConfigureAwait(false);
+            isLoadingScreen = await CompareScreenImageAsync(conn, LoadingScreenPixelComparer, token).ConfigureAwait(false);
 
             tries = 0;
             while (state != OverworldState.Overworld || isLoadingScreen)
             {
                 await Task.Delay(1_000, token).ConfigureAwait(false);
                 state = await DodoPosition.GetOverworldState(OffsetHelper.PlayerCoordJumps, token).ConfigureAwait(false);
-                isLoadingScreen = await CompareScreenImageAsync(SwitchConnection, LoadingScreenPixelComparer, token).ConfigureAwait(false);
+                isLoadingScreen = await CompareScreenImageAsync(conn, LoadingScreenPixelComparer, token).ConfigureAwait(false);
                 tries++;
                 if (tries > 12)
                     break;
@@ -1033,7 +1099,7 @@ namespace SysBot.ACNHOrders
 
             // Delay for animation
             await Task.Delay(1_500, token).ConfigureAwait(false);
-            await SwitchConnection.SetFreezePauseState(false, token).ConfigureAwait(false);
+            await conn.SetFreezePauseState(false, token).ConfigureAwait(false);
         }
 
         private async Task InjectOrder(MapTerrainLite updatedMap, CancellationToken token)
@@ -1128,24 +1194,41 @@ namespace SysBot.ACNHOrders
             return true;
         }
 
+        // Helper to obtain a usable ISwitchConnectionAsync (falls back to base Connection when needed)
+        private ISwitchConnectionAsync? GetSwitchConn() => SwitchConnection ?? (Connection as ISwitchConnectionAsync);
+
         public async Task<bool> SendAnchorBytes(int index, CancellationToken token)
         {
             var anchors = Anchors.Anchors;
             if (index < 0 || index > anchors.Length)
                 return false;
 
+            var conn = GetSwitchConn();
+            if (conn == null)
+            {
+                LogUtil.LogError("SendAnchorBytes called but no ISwitchConnectionAsync is available.", Config.IP);
+                throw new InvalidOperationException("Switch connection is not initialized.");
+            }
+
             ulong offset = await DodoPosition.FollowMainPointer(OffsetHelper.PlayerCoordJumps, token).ConfigureAwait(false);
-            await SwitchConnection.WriteBytesAbsoluteAsync(anchors[index].Anchor1, offset, token).ConfigureAwait(false);
-            await SwitchConnection.WriteBytesAbsoluteAsync(anchors[index].Anchor2, offset + 0x3C, token).ConfigureAwait(false);
+            await conn.WriteBytesAbsoluteAsync(anchors[index].Anchor1, offset, token).ConfigureAwait(false);
+            await conn.WriteBytesAbsoluteAsync(anchors[index].Anchor2, offset + 0x3C, token).ConfigureAwait(false);
 
             return true;
         }
 
         private async Task<PosRotAnchor> ReadAnchor(CancellationToken token)
         {
+            var conn = GetSwitchConn();
+            if (conn == null)
+            {
+                LogUtil.LogError("ReadAnchor called but no ISwitchConnectionAsync is available.", Config.IP);
+                throw new InvalidOperationException("Switch connection is not initialized.");
+            }
+
             ulong offset = await DodoPosition.FollowMainPointer(OffsetHelper.PlayerCoordJumps, token).ConfigureAwait(false);
-            var bytesA = await SwitchConnection.ReadBytesAbsoluteAsync(offset, 0xC, token).ConfigureAwait(false);
-            var bytesB = await SwitchConnection.ReadBytesAbsoluteAsync(offset + 0x3C, 0x4, token).ConfigureAwait(false);
+            var bytesA = await conn.ReadBytesAbsoluteAsync(offset, 0xC, token).ConfigureAwait(false);
+            var bytesB = await conn.ReadBytesAbsoluteAsync(offset + 0x3C, 0x4, token).ConfigureAwait(false);
             var sequentinalAnchor = bytesA.Concat(bytesB).ToArray();
             return new PosRotAnchor(sequentinalAnchor);
         }
@@ -1153,7 +1236,15 @@ namespace SysBot.ACNHOrders
         private async Task<bool> IsArriverNew(CancellationToken token)
         {
             var islandArriverAddress = await DodoPosition.FollowMainPointer(OffsetHelper.VillagerArrivingJumps, token).ConfigureAwait(false);
-            var arriver = await JoiningVillagerHelper.FetchVillager(islandArriverAddress, SwitchConnection, token).ConfigureAwait(false);
+
+            var conn = GetSwitchConn();
+            if (conn == null)
+            {
+                LogUtil.LogError("IsArriverNew called but no ISwitchConnectionAsync is available.", Config.IP);
+                throw new InvalidOperationException("Switch connection is not initialized.");
+            }
+
+            var arriver = await JoiningVillagerHelper.FetchVillager(islandArriverAddress, conn, token).ConfigureAwait(false);
 
             var arriverName = arriver.VillagerName;
             if (arriverName != string.Empty && arriverName != LastArrival)
@@ -1164,7 +1255,7 @@ namespace SysBot.ACNHOrders
                 LogUtil.LogInfo($"{arriverName} from {LastArrivalIsland} is arriving!", Config.IP);
 
                 if (Config.HideArrivalNames)
-                    await JoiningVillagerHelper.ClearVillager(islandArriverAddress, SwitchConnection, token).ConfigureAwait(false);
+                    await JoiningVillagerHelper.ClearVillager(islandArriverAddress, conn, token).ConfigureAwait(false);
 
                 return true;
             }
@@ -1406,8 +1497,12 @@ namespace SysBot.ACNHOrders
 
         public async Task<bool> IsGameRunning(CancellationToken token)
         {
+            var conn = SwitchConnection ?? (Connection as ISwitchConnectionAsync);
+            if (conn == null)
+                throw new InvalidOperationException("Switch connection is not initialized.");
+
             var commandBytes = Encoding.ASCII.GetBytes($"isProgramRunning 0x{ACNH_PROGRAM_ID}\r\n");
-            var isRunning = Encoding.ASCII.GetString(await SwitchConnection.ReadRaw(commandBytes, 17, token).ConfigureAwait(false));
+            var isRunning = Encoding.ASCII.GetString(await conn.ReadRaw(commandBytes, 17, token).ConfigureAwait(false));
             return ulong.Parse(isRunning.Trim(), System.Globalization.NumberStyles.HexNumber) == 1;
         }
 

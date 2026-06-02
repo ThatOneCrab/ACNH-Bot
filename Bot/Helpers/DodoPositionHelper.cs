@@ -65,11 +65,19 @@ namespace SysBot.ACNHOrders
         public DodoPositionHelper(CrossBot bot)
         {
             BotRunner = bot;
-            Connection = BotRunner.SwitchConnectedConnection;
+            // Prefer an explicitly provided switch connection; if that's null fall back to the base Connection cast.
+            Connection = BotRunner.SwitchConnectedConnection ?? (BotRunner.Connection as ISwitchConnectionAsync);
             Config = BotRunner.Config;
         }
 
-        public async Task<ulong> FollowMainPointer(long[] jumps, CancellationToken token) => await Connection.PointerAll(jumps, token).ConfigureAwait(false);
+        public async Task<ulong> FollowMainPointer(long[] jumps, CancellationToken token)
+        {
+            var conn = Connection ?? (BotRunner.SwitchConnectedConnection ?? (BotRunner.Connection as ISwitchConnectionAsync));
+            if (conn == null)
+                throw new InvalidOperationException("ISwitchConnectionAsync is not initialized. Ensure the bot's connection has been created before calling DodoPositionHelper methods.");
+
+            return await conn.PointerAll(jumps, token).ConfigureAwait(false);
+        }
 
         public async Task CloseGate(uint Offset, CancellationToken token)
         {
